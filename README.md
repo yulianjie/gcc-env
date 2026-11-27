@@ -88,7 +88,9 @@ ge setup
 
 # Or create explicit versions.
 ge create gcc13 --gcc 13.3.0
-ge create gcc15 --gcc 15.2.0 --sysroot 2.28
+ge create gcc15 --gcc 15.2.0
+# Linux only: choose a newer glibc/sysroot target.
+ge create gcc15-glibc228 --gcc 15.2.0 --sysroot 2.28
 
 ge list
 ge use gcc13

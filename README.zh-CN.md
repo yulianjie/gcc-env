@@ -69,7 +69,9 @@ ge setup
 
 # 指定版本
 ge create gcc13 --gcc 13.3.0
-ge create gcc15 --gcc 15.2.0 --sysroot 2.28
+ge create gcc15 --gcc 15.2.0
+# 仅 Linux：指定更新的 glibc/sysroot 目标
+ge create gcc15-glibc228 --gcc 15.2.0 --sysroot 2.28
 
 ge list
 ge use gcc13
