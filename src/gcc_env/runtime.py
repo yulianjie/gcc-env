@@ -25,6 +25,7 @@ class BinaryInfo:
     format: str
     dynamic: bool
     needed: list[str] = field(default_factory=list)
+    needed_paths: list[str] = field(default_factory=list)
     rpath: list[str] = field(default_factory=list)
     runpath: list[str] = field(default_factory=list)
     glibc: list[str] = field(default_factory=list)
@@ -53,6 +54,7 @@ class BinaryInfo:
             "format": self.format,
             "dynamic": self.dynamic,
             "needed": self.needed,
+            "needed_paths": self.needed_paths,
             "rpath": self.rpath,
             "runpath": self.runpath,
             "glibc": sorted(self.glibc),
@@ -205,6 +207,7 @@ def _read_pe(path: Path, env: Environment) -> BinaryInfo:
 
 def _read_macho(path: Path) -> BinaryInfo:
     needed: list[str] = []
+    needed_paths: list[str] = []
     rpath: list[str] = []
     otool = which("otool")
     if otool:
@@ -213,7 +216,9 @@ def _read_macho(path: Path) -> BinaryInfo:
             for line in result.stdout.splitlines()[1:]:
                 match = re.match(r"\s+(\S+)", line)
                 if match:
-                    needed.append(Path(match.group(1)).name)
+                    full = match.group(1)
+                    needed.append(Path(full).name)
+                    needed_paths.append(full)
         except CommandError:
             pass
         try:
@@ -233,6 +238,7 @@ def _read_macho(path: Path) -> BinaryInfo:
         format="macho",
         dynamic=bool(needed),
         needed=sorted(set(needed)),
+        needed_paths=needed_paths,
         rpath=sorted(set(rpath)),
     )
 

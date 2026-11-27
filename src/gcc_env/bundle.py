@@ -186,9 +186,16 @@ def _bundle_macos(env: Environment, binary: Path, destination: Path, info_obj) -
 
     if install_name_tool:
         for filename in copied:
-            # The original link may be an absolute conda path. Point it at the
-            # adjacent lib directory via @rpath.
-            for old in (str(env.conda_prefix / "lib" / filename), filename):
+            old_paths = [
+                path
+                for path in (info_obj.needed_paths or [])
+                if Path(path).name == filename
+            ]
+            if not old_paths:
+                old_paths = [str(env.conda_prefix / "lib" / filename), filename]
+            for old in old_paths:
+                if old.startswith("@rpath/"):
+                    continue
                 try:
                     run_capture(
                         [str(install_name_tool), "-change", old, f"@rpath/{filename}", str(target)],

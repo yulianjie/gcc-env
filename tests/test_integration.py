@@ -12,7 +12,8 @@ pytestmark = pytest.mark.integration
 
 
 def ge_root() -> Path:
-    return Path(os.environ.get("GE_INTEGRATION_ROOT", "~/.ge")).expanduser()
+    configured = os.environ.get("GE_INTEGRATION_ROOT") or os.environ.get("GE_ROOT")
+    return Path(configured or "~/.ge").expanduser()
 
 
 def ge_env() -> dict[str, str]:
