@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --dev
+      - run: uv run ruff check src tests
+      - run: uv run ruff format --check src tests
+
+  unit:
+    name: unit (${{ matrix.os }}, py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: "3.11"
+          - os: ubuntu-latest
+            python: "3.12"
+          - os: ubuntu-latest
+            python: "3.13"
+          - os: macos-latest
+            python: "3.12"
+          - os: windows-latest
+            python: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv python install ${{ matrix.python }}
+      - run: uv sync --dev --python ${{ matrix.python }}
+      - run: uv run --python ${{ matrix.python }} pytest -m "not integration" -q
+        env:
+          NO_COLOR: "1"
+
+  integration:
+    name: integration (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            root: /tmp/ge-ci
+            cache: /tmp/ge-ci
+            smoke: "0"
+          - os: macos-latest
+            root: /tmp/ge-ci
+            cache: /tmp/ge-ci
+            smoke: "1"
+          - os: windows-latest
+            root: C:/ge
+            cache: C:/ge
+            smoke: "1"
+    env:
+      GE_ROOT: ${{ matrix.root }}
+      GE_RUN_PLATFORM_SMOKE: ${{ matrix.smoke }}
+      NO_COLOR: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --dev
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ${{ matrix.cache }}/mamba/pkgs
+            ${{ matrix.cache }}/cache/uv
+            ${{ matrix.cache }}/python
+          key: ge-integration-${{ runner.os }}-${{ hashFiles('pyproject.toml', 'src/**', 'tests/**') }}
+          restore-keys: |
+            ge-integration-${{ runner.os }}-
+      - name: Run integration tests
+        run: uv run pytest -m integration -q
+        timeout-minutes: 40
+
+  build:
+    name: build package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --dev
+      - run: uv build
+      - run: uvx twine check dist/*
+      - name: Install the built wheel in a clean venv
+        run: |
+          uv venv /tmp/ge-wheel --python 3.12
+          uv pip install --python /tmp/ge-wheel/bin/python dist/*.whl
+          /tmp/ge-wheel/bin/ge --version
+          /tmp/ge-wheel/bin/ge config --json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gcc-env-dist
+          path: dist/
+          if-no-files-found: error

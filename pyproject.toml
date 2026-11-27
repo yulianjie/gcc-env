@@ -1,0 +1,79 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gcc-env"
+version = "0.1.0"
+description = "Cross-platform GCC/C++ toolchain manager built on conda-forge and uv"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Yu Lianjie" }]
+keywords = ["gcc", "g++", "toolchain", "conda-forge", "uv", "c++", "libstdc++"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: C",
+  "Programming Language :: C++",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Build Tools",
+  "Topic :: System :: Software Distribution",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/yulianjie/gcc-env"
+Repository = "https://github.com/yulianjie/gcc-env"
+Issues = "https://github.com/yulianjie/gcc-env/issues"
+Changelog = "https://github.com/yulianjie/gcc-env/releases"
+
+[project.scripts]
+ge = "gcc_env.cli:main"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3",
+  "pytest-timeout>=2.3",
+  "ruff>=0.8",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gcc_env"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src",
+  "/tests",
+  "/README.md",
+  "/README.zh-CN.md",
+  "/LICENSE",
+  "/pyproject.toml",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+  "integration: creates real toolchain environments and needs network access",
+]
+timeout = 1800
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["SIM105"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]

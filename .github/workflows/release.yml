@@ -1,0 +1,67 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build sdist and wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --dev
+      - run: uv run pytest -m "not integration" -q
+      - run: uv build
+      - run: uvx twine check dist/*
+      - name: Write checksums
+        run: |
+          cd dist
+          sha256sum *.whl *.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gcc-env-dist
+          path: dist/
+          if-no-files-found: error
+
+  github-release:
+    name: publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: gcc-env-dist
+          path: dist
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/*.whl dist/*.tar.gz dist/SHA256SUMS \
+            --title "gcc-env ${GITHUB_REF_NAME}" \
+            --generate-notes \
+            --verify-tag
+
+  pypi:
+    name: publish to PyPI (optional)
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/') && vars.PYPI_PUBLISH == 'true'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: gcc-env-dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
