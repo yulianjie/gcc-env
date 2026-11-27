@@ -187,9 +187,7 @@ def _bundle_macos(env: Environment, binary: Path, destination: Path, info_obj) -
     if install_name_tool:
         for filename in copied:
             old_paths = [
-                path
-                for path in (info_obj.needed_paths or [])
-                if Path(path).name == filename
+                path for path in (info_obj.needed_paths or []) if Path(path).name == filename
             ]
             if not old_paths:
                 old_paths = [str(env.conda_prefix / "lib" / filename), filename]
