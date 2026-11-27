@@ -119,7 +119,8 @@ class Config:
     @classmethod
     def load(cls, root: str | os.PathLike[str] | None = None) -> Config:
         platform = current_platform()
-        default_root = Path(os.environ.get("GE_ROOT", "~/.ge")).expanduser()
+        root_value = os.environ.get("GE_ROOT")
+        default_root = Path(root_value).expanduser() if root_value else Path("~/.ge").expanduser()
         if root is not None:
             default_root = Path(root).expanduser()
         root_path = default_root.resolve()

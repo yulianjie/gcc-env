@@ -34,6 +34,19 @@ def test_path_dedupe(config: Config) -> None:
     assert len(entries) == len(set(entries))
 
 
+def test_switching_cleans_previous_env(config: Config) -> None:
+    first = make_environment(config, "gcc13")
+    second = make_environment(config, "gcc14")
+    base = toolchain_env(first, base={"PATH": "/usr/bin"})
+    switched = toolchain_env(second, base=base)
+    assert str(first.conda_prefix) not in switched["PATH"]
+    assert str(first.venv_dir) not in switched["PATH"]
+    assert str(second.conda_prefix) in switched["PATH"]
+    if config.platform.is_linux:
+        assert str(first.conda_prefix) not in switched["LD_LIBRARY_PATH"]
+        assert str(second.conda_prefix) in switched["LD_LIBRARY_PATH"]
+
+
 def test_bash_activation(config: Config) -> None:
     env = make_environment(config)
     script = activation_script(env, shell="bash")

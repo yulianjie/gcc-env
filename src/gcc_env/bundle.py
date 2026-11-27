@@ -110,6 +110,8 @@ def bundle(
         destination = Path.cwd() / f"{binary.stem}-bundle"
     else:
         destination = destination.resolve()
+    if destination.exists() and not destination.is_dir():
+        raise EnvError(f"destination is not a directory: {destination}")
     if destination.exists() and any(destination.iterdir()):
         if not force:
             raise EnvError(

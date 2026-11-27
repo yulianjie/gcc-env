@@ -61,10 +61,52 @@ def _prepend(existing: str | None, entries: list[str], *, windows: bool) -> str:
     return os.pathsep.join(_dedupe_paths(parts, windows=windows))
 
 
+def _is_within(path: str, root: Path) -> bool:
+    try:
+        candidate = os.path.abspath(path)
+        base = os.path.abspath(str(root))
+        return os.path.commonpath([candidate, base]) == base
+    except (OSError, ValueError):
+        return False
+
+
+def _strip_previous_env(base_env: dict[str, str]) -> None:
+    """Remove paths from a previously activated ge environment.
+
+    This makes repeated `eval "$(ge activate ...)"` switch cleanly instead of
+    leaving an older toolchain behind the new one in PATH/LD_LIBRARY_PATH.
+    """
+    old_name = base_env.get("GE_ENV")
+    old_root = base_env.get("GE_ROOT")
+    if not old_name or not old_root:
+        return
+    old_env_dir = Path(old_root) / "envs" / old_name
+    for variable in (
+        "PATH",
+        "LD_LIBRARY_PATH",
+        "DYLD_FALLBACK_LIBRARY_PATH",
+        "LIBRARY_PATH",
+        "CMAKE_PREFIX_PATH",
+        "PKG_CONFIG_PATH",
+    ):
+        value = base_env.get(variable)
+        if not value:
+            continue
+        parts = value.split(os.pathsep)
+        kept = [part for part in parts if part and not _is_within(part, old_env_dir)]
+        if kept:
+            base_env[variable] = os.pathsep.join(kept)
+        else:
+            base_env.pop(variable, None)
+    base_env.pop("VIRTUAL_ENV", None)
+    base_env.pop("VIRTUAL_ENV_PROMPT", None)
+
+
 def toolchain_env(env: Environment, *, base: dict[str, str] | None = None) -> dict[str, str]:
     base_env = dict(os.environ if base is None else base)
     windows = env.config.platform.is_windows
     prefix = env.conda_prefix
+    _strip_previous_env(base_env)
 
     bin_dirs: list[Path] = []
     if env.python_enabled:
@@ -171,6 +213,8 @@ def activation_script(
         for key in _EXPORT_ORDER:
             if key in values:
                 lines.append(f"export {key}={_posix_quote(values[key])}")
+            elif key in {"VIRTUAL_ENV", "VIRTUAL_ENV_PROMPT"}:
+                lines.append(f"unset {key}")
         lines.append("hash -r 2>/dev/null || true")
         return "\n".join(lines) + "\n"
 
@@ -178,6 +222,8 @@ def activation_script(
         lines = [f"# gcc-env: {env.name} (GCC {env.gcc_version})"]
         for key in _EXPORT_ORDER:
             if key not in values:
+                if key in {"VIRTUAL_ENV", "VIRTUAL_ENV_PROMPT"}:
+                    lines.append(f"set -e {key}")
                 continue
             if key == "PATH":
                 parts = values[key].split(os.pathsep)
@@ -190,9 +236,10 @@ def activation_script(
     if shell in {"powershell", "pwsh"}:
         lines = [f"# gcc-env: {env.name} (GCC {env.gcc_version})"]
         for key in _EXPORT_ORDER:
-            if key not in values:
-                continue
-            lines.append(f"$env:{key} = {hex_quote_ps(values[key])}")
+            if key in values:
+                lines.append(f"$env:{key} = {hex_quote_ps(values[key])}")
+            elif key in {"VIRTUAL_ENV", "VIRTUAL_ENV_PROMPT"}:
+                lines.append(f"Remove-Item Env:{key} -ErrorAction SilentlyContinue")
         return "\n".join(lines) + "\n"
 
     if shell in {"cmd", "cmd.exe"}:
@@ -200,6 +247,8 @@ def activation_script(
         for key in _EXPORT_ORDER:
             if key in values:
                 lines.append(f'set "{key}={values[key]}"')
+            elif key in {"VIRTUAL_ENV", "VIRTUAL_ENV_PROMPT"}:
+                lines.append(f'set "{key}="')
         return "\r\n".join(lines) + "\r\n"
 
     raise ValueError(f"unsupported shell: {shell}")
