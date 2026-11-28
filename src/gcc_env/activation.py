@@ -227,7 +227,7 @@ def activation_script(
                 'if [ -z "${GE_ORIG_PS1+x}" ]; then',
                 '    GE_ORIG_PS1="${PS1-}"',
                 "fi",
-                f'PS1="({env.name}) ${{PS1-}}"',
+                f'PS1="({env.name}) ${{GE_ORIG_PS1}}"',
             ]
         )
         lines.append("hash -r 2>/dev/null || true")

@@ -55,7 +55,8 @@ examples:
   ge create gcc13 --gcc 13.3.0     create a specific GCC environment
   ge activate gcc13                activate it (after shell-init)
   c++ --version                    bare compiler now uses the environment
-  ge deactivate                    restore the previous shell environment
+  ge status                        show shell/global activation
+  ge deactivate                    restore the shell environment
   ge use gcc13                     make it the current environment
   ge shell                         open a shell with CC/CXX configured
   ge c++ -- -std=c++20 main.cpp -o app
