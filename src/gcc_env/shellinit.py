@@ -96,12 +96,23 @@ def render(shell: str) -> str:
 
 
 def _profile_from_pwsh() -> Path | None:
-    exe = shutil.which("pwsh") or shutil.which("powershell")
+    exe = shutil.which("pwsh")
     if not exe:
         return None
+    return _query_profile(exe)
+
+
+def _profile_from_windows_powershell() -> Path | None:
+    exe = shutil.which("powershell") or shutil.which("powershell.exe")
+    if not exe:
+        return None
+    return _query_profile(exe)
+
+
+def _query_profile(executable: str) -> Path | None:
     try:
         result = run_capture(
-            [exe, "-NoLogo", "-NoProfile", "-Command", "$PROFILE"],
+            [executable, "-NoLogo", "-NoProfile", "-Command", "$PROFILE"],
             timeout=30,
         )
     except Exception:
@@ -112,8 +123,7 @@ def _profile_from_pwsh() -> Path | None:
     return Path(value)
 
 
-def default_profile(shell: str) -> Path:
-    shell = normalize_shell(shell)
+def _simple_profile(shell: str) -> Path:
     home = Path.home()
     if shell == "bash":
         return home / ".bashrc"
@@ -124,14 +134,48 @@ def default_profile(shell: str) -> Path:
         config_home = os.environ.get("XDG_CONFIG_HOME")
         base = Path(config_home) if config_home else home / ".config"
         return base / "fish" / "config.fish"
-    if shell == "powershell":
-        profile = _profile_from_pwsh()
-        if profile:
-            return profile
-        if sys.platform == "win32":
-            return home / "Documents" / "PowerShell" / "Microsoft.PowerShell_profile.ps1"
-        return home / ".config" / "powershell" / "profile.ps1"
     raise UsageError(f"no profile path for shell: {shell}")
+
+
+def default_profiles(shell: str) -> list[Path]:
+    """Return all profiles that should receive the hook for this shell."""
+    shell = normalize_shell(shell)
+    if shell != "powershell":
+        return [_simple_profile(shell)]
+
+    profiles: list[Path] = []
+    for getter in (_profile_from_pwsh, _profile_from_windows_powershell):
+        profile = getter()
+        if profile is not None:
+            profiles.append(profile)
+
+    # Cover Windows PowerShell 5.1 and PowerShell 7 even if one executable is
+    # not currently on PATH (for example when installing from a restricted
+    # terminal). The queried $PROFILE paths above win when available.
+    if sys.platform == "win32":
+        for edition in ("PowerShell", "WindowsPowerShell"):
+            fallback = Path.home() / "Documents" / edition / "Microsoft.PowerShell_profile.ps1"
+            if fallback not in profiles:
+                profiles.append(fallback)
+
+    if not profiles:
+        profiles.append(Path.home() / ".config" / "powershell" / "profile.ps1")
+
+    deduped: list[Path] = []
+    seen: set[str] = set()
+    for profile in profiles:
+        key = os.path.normcase(os.path.abspath(str(profile)))
+        if key not in seen:
+            seen.add(key)
+            deduped.append(profile)
+    return deduped
+
+
+def default_profile(shell: str) -> Path:
+    shell = normalize_shell(shell)
+    if shell == "powershell":
+        return default_profiles(shell)[0]
+    return _simple_profile(shell)
 
 
 def _command_line(shell: str, executable: str | None = None) -> str:
@@ -189,6 +233,12 @@ def install(shell: str, profile: Path | None = None) -> Path:
     return destination
 
 
+def install_all(shell: str, profile: Path | None = None) -> list[Path]:
+    shell = normalize_shell(shell)
+    targets = [profile] if profile else default_profiles(shell)
+    return [install(shell, target) for target in targets]
+
+
 def uninstall(shell: str, profile: Path | None = None) -> Path:
     shell = normalize_shell(shell)
     destination = profile or default_profile(shell)
@@ -204,3 +254,9 @@ def uninstall(shell: str, profile: Path | None = None) -> Path:
         end += 1
     write_text(destination, text[:start].rstrip() + "\n" + text[end:])
     return destination
+
+
+def uninstall_all(shell: str, profile: Path | None = None) -> list[Path]:
+    shell = normalize_shell(shell)
+    targets = [profile] if profile else default_profiles(shell)
+    return [uninstall(shell, target) for target in targets]

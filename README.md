@@ -122,6 +122,18 @@ ge shell-init --install
 Invoke-Expression ((ge shell-init --shell powershell) -join [Environment]::NewLine)
 ```
 
+On Windows, `ge shell-init --install` writes both the PowerShell 7 profile
+(`Documents\PowerShell\...`) and the Windows PowerShell 5.1 profile
+(`Documents\WindowsPowerShell\...`). If `ge activate` still says “Shell
+integration is not active”, the current terminal predates the installation, or
+was started with `-NoProfile`. Close/reopen it, or initialize the current
+session with:
+
+```powershell
+Invoke-Expression ((ge shell-init --shell powershell) -join [Environment]::NewLine)
+ge activate gcc13
+```
+
 More commands:
 
 ```console

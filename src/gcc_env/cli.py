@@ -19,9 +19,9 @@ from .config import Config
 from .envs import Environment, EnvManager, validate_env_name
 from .errors import GeError, UsageError
 from .runtime import doctor as run_doctor
-from .shellinit import install as install_shell_hook
+from .shellinit import install_all as install_shell_hook
 from .shellinit import render as render_shell_hook
-from .shellinit import uninstall as uninstall_shell_hook
+from .shellinit import uninstall_all as uninstall_shell_hook
 from .state import current_session, ensure_session, pop_state, save_snapshot
 from .util import (
     configure_streams,
@@ -434,11 +434,29 @@ def cmd_activate(args, config: Config, manager: EnvManager) -> int:
     script = activation_script(env, shell=shell, session=session)
     sys.stdout.write(script)
     if not os.environ.get("GE_SHELL") and sys.stderr.isatty():
-        hint(
-            "Shell integration is not active; this only printed shell code. "
-            "Run 'ge shell-init --install' once to enable bare 'ge activate'."
-        )
+        _print_hook_hint(shell, "activate")
     return 0
+
+
+def _print_hook_hint(shell: str, action: str) -> None:
+    hint(
+        "This shell has no gcc-env hook, so the code above was only printed "
+        f"and '{action}' did not change the shell."
+    )
+    if shell in {"powershell", "pwsh"}:
+        hint(
+            "Enable it now: Invoke-Expression ((ge shell-init --shell powershell) "
+            "-join [Environment]::NewLine)"
+        )
+        hint("Then run 'ge activate gcc13' again. For future shells: ge shell-init --install.")
+    elif shell in {"bash", "zsh"}:
+        hint(f'Enable it now: eval "$(ge shell-init --shell {shell})"')
+        hint("For future shells: ge shell-init --install.")
+    elif shell == "fish":
+        hint("Enable it now: ge shell-init --shell fish | source")
+        hint("For future shells: ge shell-init --install.")
+    else:
+        hint("Install the shell hook with: ge shell-init --install")
 
 
 def cmd_deactivate(args, config: Config, manager: EnvManager) -> int:
@@ -452,10 +470,7 @@ def cmd_deactivate(args, config: Config, manager: EnvManager) -> int:
         return 0
     sys.stdout.write(deactivation_script(state["env"], shell=shell))
     if not os.environ.get("GE_SHELL") and sys.stderr.isatty():
-        hint(
-            "Shell integration is not active; this only printed shell code. "
-            "Run 'ge shell-init --install' once to enable bare 'ge deactivate'."
-        )
+        _print_hook_hint(shell, "deactivate")
     return 0
 
 
@@ -467,13 +482,22 @@ def cmd_shell_init(args, config: Config, manager: EnvManager) -> int:
         raise UsageError("--install and --uninstall are mutually exclusive")
     if args.install or args.uninstall:
         if args.uninstall:
-            destination = uninstall_shell_hook(shell, args.profile)
-            info(f"removed gcc-env shell integration from {destination}")
+            destinations = uninstall_shell_hook(shell, args.profile)
+            for destination in destinations:
+                info(f"removed gcc-env shell integration from {destination}")
         else:
-            destination = install_shell_hook(shell, args.profile)
-            success(f"installed gcc-env shell integration in {destination}")
-            info("Restart the shell or source the profile to enable 'ge activate'.")
-        print(destination)
+            destinations = install_shell_hook(shell, args.profile)
+            for destination in destinations:
+                success(f"installed gcc-env shell integration in {destination}")
+            info("Restart the shell (or dot-source the profile) to enable 'ge activate'.")
+            if shell == "powershell":
+                info(
+                    "For the current PowerShell session, run: "
+                    "Invoke-Expression ((ge shell-init --shell powershell) "
+                    "-join [Environment]::NewLine)"
+                )
+        for destination in destinations:
+            print(destination)
         return 0
     sys.stdout.write(render_shell_hook(shell))
     return 0

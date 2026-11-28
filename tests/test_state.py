@@ -90,6 +90,17 @@ def test_shell_init_install(tmp_path: Path) -> None:
     assert "gcc-env shell integration" not in profile.read_text(encoding="utf-8")
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell profiles")
+def test_powershell_profiles_cover_both_editions() -> None:
+    from gcc_env.shellinit import default_profiles
+
+    profiles = default_profiles("powershell")
+    names = [str(path) for path in profiles]
+    assert len(names) >= 2
+    assert any("WindowsPowerShell" in name for name in names)
+    assert any("PowerShell" in name and "WindowsPowerShell" not in name for name in names)
+
+
 def test_shims(config: Config) -> None:
     env = make_environment(config)
     env.ensure_shims()

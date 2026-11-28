@@ -91,6 +91,17 @@ ge deactivate
 eval "$(ge activate gcc13)"
 ```
 
+Windows 上 `ge shell-init --install` 会同时写入 PowerShell 7
+（`Documents\PowerShell\...`）和 Windows PowerShell 5.1
+（`Documents\WindowsPowerShell\...`）的 profile。如果 `ge activate` 仍提示
+“Shell integration is not active”，说明当前终端是在安装前打开的，或者启动时
+带了 `-NoProfile`。关闭重开，或在当前会话执行：
+
+```powershell
+Invoke-Expression ((ge shell-init --shell powershell) -join [Environment]::NewLine)
+ge activate gcc13
+```
+
 hook 是幂等的，可用 `ge shell-init --uninstall` 移除。`ge deactivate` 会恢复到
 该 shell 第一次激活前的环境，并把编译器 shim 从 `PATH` 移除。
 
