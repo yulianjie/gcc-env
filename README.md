@@ -39,6 +39,8 @@ system compiler, ABI-incompatible `libstdc++`, and build scripts that cache
 - **Portable output.** `ge c++` links the C++ runtime statically by default and
   `ge bundle` can produce a relocatable directory with `libstdc++` next to your
   application instead of depending on the target machine.
+- **Bare compiler names.** After activation, `c`, `cc`, `gcc`, `c++`, and `g++`
+  are available directly (no `ge` prefix) through per-environment shims.
 - **Explainable diagnosis.** `ge doctor` compiles a probe, reads `GLIBC_*`,
   `GLIBCXX_*`, and `CXXABI_*` symbol requirements, compares them with the target
   glibc and the system libstdc++, and tells you exactly what will break.
@@ -86,30 +88,50 @@ ge bootstrap
 # GCC 15 on macOS) with Python 3.12 + cmake + ninja, and select it.
 ge setup
 
-# Or create explicit versions.
+# One-time shell integration: makes `ge activate` modify the current shell
+# directly instead of merely printing shell code.
+ge shell-init --install
+# Restart the shell (or source your profile), then:
 ge create gcc13 --gcc 13.3.0
+ge activate gcc13
+
+# Compiler names are now available without the `ge` prefix.
+c++ --version
+c++ -std=c++20 main.cpp -o app
+
+ge deactivate
+```
+
+`ge activate` must be able to modify the **current** shell. A normal executable
+cannot do that, so `ge shell-init --install` adds a small wrapper function to
+your profile (`bash`/`zsh`/`fish`/PowerShell). Without the hook, use the
+explicit fallback:
+
+```console
+eval "$(ge activate gcc13)"
+```
+
+The hook is idempotent and can be removed with `ge shell-init --uninstall`.
+`ge deactivate` restores the environment from before the first activation in
+that shell (it also removes the per-environment compiler shims from `PATH`).
+
+PowerShell users can install/print the hook directly:
+
+```powershell
+ge shell-init --install
+Invoke-Expression ((ge shell-init --shell powershell) -join [Environment]::NewLine)
+```
+
+More commands:
+
+```console
+ge list
+ge use gcc13
+ge shell
+ge run gcc13 -- cmake --version
 ge create gcc15 --gcc 15.2.0
 # Linux only: choose a newer glibc/sysroot target.
 ge create gcc15-glibc228 --gcc 15.2.0 --sysroot 2.28
-
-ge list
-ge use gcc13
-ge current
-
-# Compile with the selected environment. Everything after -- goes to g++.
-ge c++ -- -std=c++20 -O2 main.cpp -o app
-
-# Open a clean shell with CC/CXX/PATH configured.
-ge shell
-
-# POSIX shell activation (bash/zsh):
-eval "$(ge activate gcc13)"
-
-# PowerShell:
-ge activate gcc13 --shell powershell | Invoke-Expression
-
-# Run one command inside an environment.
-ge run gcc13 -- cmake --version
 ```
 
 `ge` also ships `ge cc`, `ge gcc` and `ge g++` aliases. Advanced compiler flags
@@ -134,7 +156,9 @@ ge c++ --print-command -- -std=c++20 main.cpp -o app
 | `ge remove NAME` | Delete an environment (asks for confirmation; `--yes` for scripts). |
 | `ge shell [NAME]` | Spawn a clean interactive shell with the toolchain activated. |
 | `ge run [NAME] -- CMD` | Run one command with `CC`, `CXX`, `PATH`, and runtime paths set. |
-| `ge activate [NAME]` | Print shell code (`bash`, `zsh`, `fish`, `powershell`, `cmd`). |
+| `ge activate [NAME]` | Activate in the current shell (requires `ge shell-init --install`). |
+| `ge deactivate` | Restore the shell environment from before activation. |
+| `ge shell-init` | Print the shell hook; `--install`/`--uninstall` manage the profile block. |
 | `ge cc` / `ge c++` | Invoke the environment C/C++ compiler with the runtime policy applied. |
 | `ge doctor [NAME]` | Check compiler, glibc target, libstdc++, RPATH, and uv tools. |
 | `ge bundle BINARY` | Copy a binary plus the required GCC runtime into a relocatable folder. |
@@ -155,7 +179,9 @@ Use `ge COMMAND --help` for details.
 │   └── gcc13/
 │       ├── conda/       # conda-forge GCC, binutils, sysroot, patchelf
 │       ├── venv/        # uv venv with cmake/ninja (per toolchain)
+│       ├── bin/         # c/cc/gcc/c++/g++ shims for bare compiler names
 │       └── env.json     # exact resolved versions and paths
+├── state/               # per-shell activation snapshots for ge deactivate
 ├── current              # name of the selected environment
 └── config.toml          # optional defaults
 ```
@@ -177,12 +203,17 @@ Use `ge COMMAND --help` for details.
    `uv pip install cmake ninja` for build tooling. Use `--no-python` if you only
    need the compiler.
 
-Activation reconstructs a minimal, clean environment: it prepends the venv and
-toolchain `bin` directories, exports `CC`/`CXX`/`AR`/`LD`/..., sets
-`CMAKE_PREFIX_PATH` and `CONDA_BUILD_SYSROOT`, and prepends the toolchain `lib`
-directory to the runtime loader path. It deliberately does **not** import
-conda-build's default `-march=nocona`/`-O2` flags, so your project's flags remain
-yours.
+Activation reconstructs a minimal, clean environment: it prepends the
+environment's shim directory, venv, and toolchain `bin` directories, exports
+`CC`/`CXX`/`AR`/`LD`/..., sets `CMAKE_PREFIX_PATH` and
+`CONDA_BUILD_SYSROOT`, and prepends the toolchain `lib` directory to the runtime
+loader path. It deliberately does **not** import conda-build's default
+`-march=nocona`/`-O2` flags, so your project's flags remain yours.
+
+The shim directory contains `c`, `cc`, `gcc`, `c++`, and `g++` wrappers that
+delegate to `ge cc` / `ge c++`, so the bare compiler names respect the same
+runtime policy. `ge shell-init --install` is what lets `ge activate`/`ge deactivate`
+change the parent shell; without it, use `eval "$(ge activate ...)"`.
 
 ### Why micromamba *and* uv?
 

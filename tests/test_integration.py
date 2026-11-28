@@ -21,6 +21,8 @@ def ge_env() -> dict[str, str]:
     env["GE_ROOT"] = str(ge_root())
     env["NO_COLOR"] = "1"
     env["GE_DOWNLOAD_TIMEOUT"] = "120"
+    # Integration tests may invoke per-environment shims, which call `ge`.
+    env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env.get("PATH", "")
     return env
 
 
@@ -236,6 +238,45 @@ def test_activate_script(gcc13_env: str) -> None:
     assert "export CC=" in script
     assert "export CXX=" in script
     assert "GE_ENV=gcc13" in script or f"GE_ENV={gcc13_env}" in script
+
+
+def test_shell_hook_and_bare_compiler(tmp_path: Path, gcc13_env: str) -> None:
+    source = tmp_path / "bare.cpp"
+    source.write_text(
+        "#include <format>\n#include <iostream>\n"
+        'int main(){ std::cout << std::format("bare {}\\n", 42); }\n',
+        encoding="utf-8",
+    )
+    binary = tmp_path / "bare"
+    script = f"""
+set -e
+eval "$(ge shell-init --shell bash)"
+ge activate {gcc13_env}
+command -v c++ | grep -q '{ge_root()}/envs/{gcc13_env}/bin/c++'
+c++ -std=c++20 '{source}' -o '{binary}'
+'{binary}'
+if readelf -d '{binary}' | grep -q libstdc++; then
+  echo "bare c++ did not use the static runtime" >&2
+  exit 1
+fi
+ge deactivate
+test -z "${{GE_ENV-}}"
+case "$PATH" in
+  *"/envs/{gcc13_env}/"*) echo "environment still on PATH" >&2; exit 1 ;;
+esac
+echo BARE_OK
+"""
+    result = subprocess.run(
+        ["bash", "-c", script],
+        env=ge_env(),
+        capture_output=True,
+        text=True,
+        errors="replace",
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "bare 42" in result.stdout
+    assert "BARE_OK" in result.stdout
 
 
 def test_platform_smoke(tmp_path: Path) -> None:

@@ -7,6 +7,7 @@ import shlex
 from pathlib import Path
 
 from .envs import Environment
+from .state import MANAGED_VARS
 from .util import hex_quote_ps, shell_basename
 
 # Variables that describe the toolchain, in a stable display order.
@@ -109,6 +110,8 @@ def toolchain_env(env: Environment, *, base: dict[str, str] | None = None) -> di
     _strip_previous_env(base_env)
 
     bin_dirs: list[Path] = []
+    if env.shim_dir.is_dir():
+        bin_dirs.append(env.shim_dir)
     if env.python_enabled:
         venv_bin = env.venv_bin()
         if venv_bin:
@@ -202,6 +205,7 @@ def activation_script(
     *,
     shell: str,
     base: dict[str, str] | None = None,
+    session: str | None = None,
 ) -> str:
     values = toolchain_env(env, base=base)
     shell = shell_basename(shell)
@@ -215,6 +219,9 @@ def activation_script(
                 lines.append(f"export {key}={_posix_quote(values[key])}")
             elif key in {"VIRTUAL_ENV", "VIRTUAL_ENV_PROMPT"}:
                 lines.append(f"unset {key}")
+        if session:
+            lines.append(f"export GE_SESSION={_posix_quote(session)}")
+        lines.append("export GE_ACTIVE=1")
         lines.append("hash -r 2>/dev/null || true")
         return "\n".join(lines) + "\n"
 
@@ -231,6 +238,9 @@ def activation_script(
                 lines.append(f"set -gx PATH {joined}")
             else:
                 lines.append(f"set -gx {key} {_fish_quote(values[key])}")
+        if session:
+            lines.append(f"set -gx GE_SESSION {_fish_quote(session)}")
+        lines.append("set -gx GE_ACTIVE 1")
         return "\n".join(lines) + "\n"
 
     if shell in {"powershell", "pwsh"}:
@@ -240,6 +250,9 @@ def activation_script(
                 lines.append(f"$env:{key} = {hex_quote_ps(values[key])}")
             elif key in {"VIRTUAL_ENV", "VIRTUAL_ENV_PROMPT"}:
                 lines.append(f"Remove-Item Env:{key} -ErrorAction SilentlyContinue")
+        if session:
+            lines.append(f"$env:GE_SESSION = {hex_quote_ps(session)}")
+        lines.append("$env:GE_ACTIVE = '1'")
         return "\n".join(lines) + "\n"
 
     if shell in {"cmd", "cmd.exe"}:
@@ -248,6 +261,62 @@ def activation_script(
             if key in values:
                 lines.append(f'set "{key}={values[key]}"')
             elif key in {"VIRTUAL_ENV", "VIRTUAL_ENV_PROMPT"}:
+                lines.append(f'set "{key}="')
+        if session:
+            lines.append(f'set "GE_SESSION={session}"')
+        lines.append('set "GE_ACTIVE=1"')
+        return "\r\n".join(lines) + "\r\n"
+
+    raise ValueError(f"unsupported shell: {shell}")
+
+
+def deactivation_script(snapshot: dict[str, str], *, shell: str) -> str:
+    """Generate shell code that restores a state snapshot."""
+    shell = shell_basename(shell)
+    if shell in {"sh", "dash", "ksh"}:
+        shell = "bash"
+    values = dict(snapshot)
+    if "PATH" not in values:
+        values["PATH"] = os.defpath
+
+    if shell in {"bash", "zsh"}:
+        lines = ["# gcc-env: deactivated"]
+        for key in MANAGED_VARS:
+            if key in values:
+                lines.append(f"export {key}={_posix_quote(values[key])}")
+            else:
+                lines.append(f"unset {key}")
+        lines.append("hash -r 2>/dev/null || true")
+        return "\n".join(lines) + "\n"
+
+    if shell == "fish":
+        lines = ["# gcc-env: deactivated"]
+        for key in MANAGED_VARS:
+            if key not in values:
+                lines.append(f"set -e {key}")
+            elif key == "PATH":
+                parts = values[key].split(os.pathsep)
+                joined = " ".join(_fish_quote(part) for part in parts if part)
+                lines.append(f"set -gx PATH {joined}")
+            else:
+                lines.append(f"set -gx {key} {_fish_quote(values[key])}")
+        return "\n".join(lines) + "\n"
+
+    if shell in {"powershell", "pwsh"}:
+        lines = ["# gcc-env: deactivated"]
+        for key in MANAGED_VARS:
+            if key in values:
+                lines.append(f"$env:{key} = {hex_quote_ps(values[key])}")
+            else:
+                lines.append(f"Remove-Item Env:{key} -ErrorAction SilentlyContinue")
+        return "\n".join(lines) + "\n"
+
+    if shell in {"cmd", "cmd.exe"}:
+        lines = ["@rem gcc-env: deactivated"]
+        for key in MANAGED_VARS:
+            if key in values:
+                lines.append(f'set "{key}={values[key]}"')
+            else:
                 lines.append(f'set "{key}="')
         return "\r\n".join(lines) + "\r\n"
 

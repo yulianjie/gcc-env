@@ -88,6 +88,10 @@ class Config:
         return self.root / "current"
 
     @property
+    def state_dir(self) -> Path:
+        return self.root / "state"
+
+    @property
     def lock_path(self) -> Path:
         return self.root / ".lock"
 
@@ -112,6 +116,7 @@ class Config:
             self.uv_cache_dir,
             self.uv_python_dir,
             self.mamba_root,
+            self.state_dir,
         ):
             directory.mkdir(parents=True, exist_ok=True)
 

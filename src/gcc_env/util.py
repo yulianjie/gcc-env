@@ -494,6 +494,11 @@ def shell_basename(shell: str) -> str:
 
 
 def detect_shell() -> str:
+    override = os.environ.get("GE_SHELL")
+    if override:
+        name = shell_basename(override)
+        if name in {"bash", "zsh", "fish", "sh", "dash", "ksh", "powershell", "pwsh"}:
+            return name
     if os.name == "nt":
         return "powershell"
     shell = os.environ.get("SHELL", "")

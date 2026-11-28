@@ -33,6 +33,8 @@ Linux 完全一致。
   `ninja`（可配置）。
 - **可分发产物**：`ge c++` 默认静态链接 C++ 运行时；`ge bundle` 可把
   `libstdc++` 等运行库复制到应用目录，生成可重定位分发包。
+- **裸编译器名**：激活后可直接使用 `c`、`cc`、`gcc`、`c++`、`g++`，无需
+  `ge` 前缀。
 - **可解释的诊断**：`ge doctor` 会编译探针，读取 `GLIBC_*`、`GLIBCXX_*`、
   `CXXABI_*` 符号需求，与目标 glibc 和系统 libstdc++ 比较，告诉你为什么会在
   目标机器上崩溃。
@@ -67,30 +69,41 @@ uv tool install ./gcc_env-0.1.0-py3-none-any.whl
 # macOS 为 GCC 15），包含 Python 3.12 + cmake + ninja，并设为当前环境。
 ge setup
 
-# 指定版本
+# 一次性安装 shell 集成：让 ge activate 直接修改当前 shell，
+# 而不是仅仅打印激活代码。
+ge shell-init --install
+# 重启 shell（或 source 配置文件）后：
 ge create gcc13 --gcc 13.3.0
+ge activate gcc13
+
+# 激活后可直接使用编译器名，不需要 ge 前缀。
+c++ --version
+c++ -std=c++20 main.cpp -o app
+
+ge deactivate
+```
+
+`ge activate` 必须修改**当前 shell**。普通可执行程序无法做到这一点，因此
+`ge shell-init --install` 会在 profile（bash/zsh/fish/PowerShell）中安装一个
+轻量 wrapper 函数。没有安装 hook 时，使用显式方式：
+
+```console
+eval "$(ge activate gcc13)"
+```
+
+hook 是幂等的，可用 `ge shell-init --uninstall` 移除。`ge deactivate` 会恢复到
+该 shell 第一次激活前的环境，并把编译器 shim 从 `PATH` 移除。
+
+其他常用命令：
+
+```console
+ge list
+ge use gcc13
+ge shell
+ge run gcc13 -- cmake --version
 ge create gcc15 --gcc 15.2.0
 # 仅 Linux：指定更新的 glibc/sysroot 目标
 ge create gcc15-glibc228 --gcc 15.2.0 --sysroot 2.28
-
-ge list
-ge use gcc13
-ge current
-
-# 使用当前环境编译；-- 之后的参数原样传给 g++。
-ge c++ -- -std=c++20 -O2 main.cpp -o app
-
-# 打开已配置 CC/CXX/PATH 的干净 shell。
-ge shell
-
-# POSIX shell（bash/zsh）激活：
-eval "$(ge activate gcc13)"
-
-# PowerShell 激活：
-ge activate gcc13 --shell powershell | Invoke-Expression
-
-# 在指定环境中运行一条命令。
-ge run gcc13 -- cmake --version
 ```
 
 `ge` 还提供 `ge cc`、`ge gcc`、`ge g++`。`ge` 自己的选项必须放在第一个编译器
@@ -115,7 +128,9 @@ ge c++ --print-command -- -std=c++20 main.cpp -o app
 | `ge remove NAME` | 删除环境（默认需要确认，脚本中加 `--yes`）。 |
 | `ge shell [NAME]` | 打开已激活工具链的干净交互 shell。 |
 | `ge run [NAME] -- CMD` | 在环境中运行一条命令。 |
-| `ge activate [NAME]` | 输出 shell 激活代码（bash/zsh/fish/powershell/cmd）。 |
+| `ge activate [NAME]` | 在当前 shell 中激活（需先执行 `ge shell-init --install`）。 |
+| `ge deactivate` | 恢复激活前的 shell 环境。 |
+| `ge shell-init` | 打印/安装/卸载 shell hook（`--install`、`--uninstall`）。 |
 | `ge cc` / `ge c++` | 按运行时策略调用环境 C/C++ 编译器。 |
 | `ge doctor [NAME]` | 检查编译器、glibc 目标、libstdc++、RPATH 和 uv 工具。 |
 | `ge bundle BINARY` | 复制二进制和所需 GCC 运行库，生成可重定位目录。 |
@@ -133,7 +148,9 @@ ge c++ --print-command -- -std=c++20 main.cpp -o app
 │   └── gcc13/
 │       ├── conda/       # conda-forge GCC、binutils、sysroot、patchelf
 │       ├── venv/        # uv 创建的 cmake/ninja 虚拟环境
+│       ├── bin/         # c/cc/gcc/c++/g++ 裸命令 shim
 │       └── env.json     # 解析后的精确版本和路径
+├── state/               # 每个 shell 的激活快照，供 ge deactivate 使用
 ├── current              # 当前环境名
 └── config.toml          # 可选默认配置
 ```
@@ -152,10 +169,15 @@ ge c++ --print-command -- -std=c++20 main.cpp -o app
 3. 执行 `uv venv --seed --python 3.12`，再用 `uv pip install cmake ninja`
    安装构建工具。只需要编译器时可使用 `--no-python`。
 
-激活环境时只重建最小必要变量：把 venv 和工具链 `bin` 目录前置，导出
-`CC`/`CXX`/`AR`/`LD` 等，设置 `CMAKE_PREFIX_PATH`、`CONDA_BUILD_SYSROOT` 和
-运行库路径。它**不会**导入 conda-build 默认的 `-march=nocona`/`-O2` 等编译
-选项，你的项目编译参数仍然由你控制。
+激活环境时只重建最小必要变量：把环境的 shim 目录、venv 和工具链 `bin` 目录
+前置，导出 `CC`/`CXX`/`AR`/`LD` 等，设置 `CMAKE_PREFIX_PATH`、
+`CONDA_BUILD_SYSROOT` 和运行库路径。它**不会**导入 conda-build 默认的
+`-march=nocona`/`-O2` 等编译选项，你的项目编译参数仍然由你控制。
+
+shim 目录包含 `c`、`cc`、`gcc`、`c++`、`g++` 包装命令，它们委托给 `ge cc` /
+`ge c++`，因此裸编译器名也遵循相同的运行时策略。`ge shell-init --install`
+负责让 `ge activate`/`ge deactivate` 能修改父 shell；没有安装 hook 时请使用
+`eval "$(ge activate ...)"`。
 
 ## `libstdc++.so.6` 问题
 

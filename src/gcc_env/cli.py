@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .activation import activation_script, prompt_label, shell_environment
+from .activation import activation_script, deactivation_script, prompt_label, shell_environment
 from .bootstrap import Bootstrap
 from .bundle import bundle as bundle_binary
 from .cmake import render_toolchain, write_toolchain
@@ -19,6 +19,10 @@ from .config import Config
 from .envs import Environment, EnvManager, validate_env_name
 from .errors import GeError, UsageError
 from .runtime import doctor as run_doctor
+from .shellinit import install as install_shell_hook
+from .shellinit import render as render_shell_hook
+from .shellinit import uninstall as uninstall_shell_hook
+from .state import current_session, ensure_session, pop_state, save_snapshot
 from .util import (
     configure_streams,
     detect_shell,
@@ -47,11 +51,15 @@ one-command switching plus portable-runtime helpers for libstdc++.
 EXAMPLES = """\
 examples:
   ge setup                         bootstrap uv + micromamba and create "default"
+  ge shell-init --install          enable direct activation in this shell
   ge create gcc13 --gcc 13.3.0     create a specific GCC environment
+  ge activate gcc13                activate it (after shell-init)
+  c++ --version                    bare compiler now uses the environment
+  ge deactivate                    restore the previous shell environment
   ge use gcc13                     make it the current environment
   ge shell                         open a shell with CC/CXX configured
   ge c++ -- -std=c++20 main.cpp -o app
-  eval "$(ge activate gcc13)"      activate in the current POSIX shell
+  eval "$(ge activate gcc13)"      fallback without the shell hook
   ge doctor                        check libstdc++/glibc portability
   ge bundle ./app ./dist           copy runtime libraries for shipping
 
@@ -122,13 +130,37 @@ def build_parser() -> argparse.ArgumentParser:
         add_help=False,
     )
 
-    p = sub.add_parser("activate", help="print shell code that activates an environment")
+    p = sub.add_parser("activate", help="activate an environment in the current shell")
     p.add_argument("name", nargs="?")
     p.add_argument(
         "--shell",
         default="auto",
         help="bash, zsh, fish, powershell, cmd, or auto (default)",
     )
+
+    p = sub.add_parser("deactivate", help="restore the shell environment before activation")
+    p.add_argument(
+        "--shell",
+        default="auto",
+        help="bash, zsh, fish, powershell, cmd, or auto (default)",
+    )
+
+    p = sub.add_parser(
+        "shell-init",
+        help="print or install the shell hook that makes 'ge activate' work directly",
+    )
+    p.add_argument(
+        "--shell",
+        default="auto",
+        help="bash, zsh, fish, powershell, or auto (default)",
+    )
+    p.add_argument(
+        "--install",
+        action="store_true",
+        help="append a managed block to the shell profile",
+    )
+    p.add_argument("--uninstall", action="store_true", help="remove the managed profile block")
+    p.add_argument("--profile", type=Path, help="override the profile path")
 
     p = sub.add_parser(
         "doctor",
@@ -326,7 +358,8 @@ def _details(env: Environment) -> dict:
         },
         "created_at": env.meta.get("created_at"),
         "activate": (
-            f"ge activate {env.name} --shell powershell | Invoke-Expression"
+            "Invoke-Expression ((ge activate "
+            f"{env.name} --shell powershell) -join [Environment]::NewLine)"
             if env.config.platform.is_windows
             else f'eval "$(ge activate {env.name})"'
         ),
@@ -392,11 +425,57 @@ def cmd_remove(args, config: Config, manager: EnvManager) -> int:
 
 def cmd_activate(args, config: Config, manager: EnvManager) -> int:
     env = _resolve(manager, args.name)
+    env.ensure_shims()
     shell = args.shell
     if shell == "auto":
         shell = detect_shell()
-    script = activation_script(env, shell=shell)
+    session = ensure_session()
+    save_snapshot(config, session, env.name)
+    script = activation_script(env, shell=shell, session=session)
     sys.stdout.write(script)
+    if not os.environ.get("GE_SHELL") and sys.stderr.isatty():
+        hint(
+            "Shell integration is not active; this only printed shell code. "
+            "Run 'ge shell-init --install' once to enable bare 'ge activate'."
+        )
+    return 0
+
+
+def cmd_deactivate(args, config: Config, manager: EnvManager) -> int:
+    shell = args.shell
+    if shell == "auto":
+        shell = detect_shell()
+    session = current_session()
+    state = pop_state(config, session)
+    if state is None:
+        info("no active gcc-env environment")
+        return 0
+    sys.stdout.write(deactivation_script(state["env"], shell=shell))
+    if not os.environ.get("GE_SHELL") and sys.stderr.isatty():
+        hint(
+            "Shell integration is not active; this only printed shell code. "
+            "Run 'ge shell-init --install' once to enable bare 'ge deactivate'."
+        )
+    return 0
+
+
+def cmd_shell_init(args, config: Config, manager: EnvManager) -> int:
+    shell = args.shell
+    if shell == "auto":
+        shell = detect_shell()
+    if args.install and args.uninstall:
+        raise UsageError("--install and --uninstall are mutually exclusive")
+    if args.install or args.uninstall:
+        if args.uninstall:
+            destination = uninstall_shell_hook(shell, args.profile)
+            info(f"removed gcc-env shell integration from {destination}")
+        else:
+            destination = install_shell_hook(shell, args.profile)
+            success(f"installed gcc-env shell integration in {destination}")
+            info("Restart the shell or source the profile to enable 'ge activate'.")
+        print(destination)
+        return 0
+    sys.stdout.write(render_shell_hook(shell))
     return 0
 
 
@@ -454,6 +533,7 @@ def _shell_argv(executable: str, *, rc: bool) -> list[str]:
 
 def cmd_shell(args, config: Config, manager: EnvManager) -> int:
     env = _resolve(manager, args.name)
+    env.ensure_shims()
     command = _shell_command(args.shell, rc=args.rc)
     env_vars = shell_environment(env)
     if not args.quiet:
@@ -674,6 +754,7 @@ def _run_command_manual(tokens: list[str]) -> int:
 
     manager = _manager()
     env = _resolve(manager, env_name)
+    env.ensure_shims()
     return run_inherit(tokens, env=shell_environment(env))
 
 
@@ -726,6 +807,8 @@ def main(argv: list[str] | None = None) -> int:
             "rm": cmd_remove,
             "shell": cmd_shell,
             "activate": cmd_activate,
+            "deactivate": cmd_deactivate,
+            "shell-init": cmd_shell_init,
             "doctor": cmd_doctor,
             "bundle": cmd_bundle,
             "toolchain": cmd_toolchain,
