@@ -297,6 +297,32 @@ class EnvManager:
             self.config.current_path.write_text(env.name + "\n", encoding="utf-8")
         success(f"current environment: {env.name}")
 
+    def active_name(self) -> str | None:
+        try:
+            name = self.config.active_path.read_text(encoding="utf-8").strip()
+        except OSError:
+            return None
+        if not name:
+            return None
+        try:
+            self.load(name)
+        except EnvError:
+            self.clear_active()
+            return None
+        return name
+
+    def set_active(self, name: str) -> None:
+        env = self.load(name)
+        self.config.ensure_layout()
+        with FileLock(self.config.lock_path):
+            self.config.active_path.write_text(env.name + "\n", encoding="utf-8")
+
+    def clear_active(self) -> None:
+        try:
+            self.config.active_path.unlink()
+        except OSError:
+            pass
+
     def clear_current(self, name: str) -> None:
         try:
             current = self.config.current_path.read_text(encoding="utf-8").strip()
@@ -443,6 +469,8 @@ class EnvManager:
         with FileLock(self.config.lock_path):
             rmtree(env.root)
             self.clear_current(env.name)
+            if self.active_name() == env.name:
+                self.clear_active()
         success(f"removed environment {env.name}")
 
 

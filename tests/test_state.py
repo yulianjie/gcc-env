@@ -21,6 +21,7 @@ def test_activation_script_has_session(config: Config) -> None:
     assert "export GE_SESSION=abc123" in script
     assert "export GE_ACTIVE=1" in script
     assert str(env.shim_dir) in script
+    assert 'PS1="(gcc14) ' in script
 
 
 def test_deactivation_restores_snapshot(config: Config) -> None:
@@ -62,6 +63,7 @@ def test_cli_activate_and_deactivate(
     assert main(["activate", "gcc14", "--shell", "bash"]) == 0
     script = capsys.readouterr().out
     assert "export GE_SESSION=" in script
+    assert config.active_path.read_text(encoding="utf-8").strip() == "gcc14"
     session_line = next(
         line for line in script.splitlines() if line.startswith("export GE_SESSION=")
     )
@@ -73,6 +75,18 @@ def test_cli_activate_and_deactivate(
     restored = capsys.readouterr().out
     assert "export CC=original-cc" in restored
     assert not (config.state_dir / f"{session}.json").exists()
+    assert not config.active_path.exists()
+
+
+def test_session_activation_is_not_global(
+    config: Config, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("GE_ROOT", str(config.root))
+    monkeypatch.delenv("GE_SESSION", raising=False)
+    make_environment(config)
+    assert main(["activate", "gcc14", "--shell", "bash", "--session"]) == 0
+    capsys.readouterr()
+    assert not config.active_path.exists()
 
 
 def test_shell_init_install(tmp_path: Path) -> None:

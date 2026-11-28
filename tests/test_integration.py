@@ -234,10 +234,11 @@ def test_bundle_shared_runtime(tmp_path: Path, gcc13_env: str) -> None:
 
 
 def test_activate_script(gcc13_env: str) -> None:
-    script = run_ge("activate", gcc13_env, "--shell", "bash").stdout
+    script = run_ge("activate", gcc13_env, "--shell", "bash", "--session").stdout
     assert "export CC=" in script
     assert "export CXX=" in script
     assert "GE_ENV=gcc13" in script or f"GE_ENV={gcc13_env}" in script
+    assert f'PS1="({gcc13_env}) ' in script
 
 
 def test_shell_hook_and_bare_compiler(tmp_path: Path, gcc13_env: str) -> None:

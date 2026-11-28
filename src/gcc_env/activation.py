@@ -222,6 +222,14 @@ def activation_script(
         if session:
             lines.append(f"export GE_SESSION={_posix_quote(session)}")
         lines.append("export GE_ACTIVE=1")
+        lines.extend(
+            [
+                'if [ -z "${GE_ORIG_PS1+x}" ]; then',
+                '    GE_ORIG_PS1="${PS1-}"',
+                "fi",
+                f'PS1="({env.name}) ${{PS1-}}"',
+            ]
+        )
         lines.append("hash -r 2>/dev/null || true")
         return "\n".join(lines) + "\n"
 
@@ -241,6 +249,17 @@ def activation_script(
         if session:
             lines.append(f"set -gx GE_SESSION {_fish_quote(session)}")
         lines.append("set -gx GE_ACTIVE 1")
+        lines.extend(
+            [
+                "if not functions -q __ge_original_prompt",
+                "    functions -c fish_prompt __ge_original_prompt",
+                "end",
+                "function fish_prompt",
+                f"    printf '%s' {_fish_quote(f'({env.name}) ')}",
+                "    __ge_original_prompt",
+                "end",
+            ]
+        )
         return "\n".join(lines) + "\n"
 
     if shell in {"powershell", "pwsh"}:
@@ -253,6 +272,17 @@ def activation_script(
         if session:
             lines.append(f"$env:GE_SESSION = {hex_quote_ps(session)}")
         lines.append("$env:GE_ACTIVE = '1'")
+        lines.extend(
+            [
+                "if (-not $global:__ge_original_prompt) {",
+                "    $global:__ge_original_prompt = $function:prompt",
+                "}",
+                "function global:prompt {",
+                "    $base = & $global:__ge_original_prompt",
+                f"    {hex_quote_ps(f'({env.name}) ')} + $base",
+                "}",
+            ]
+        )
         return "\n".join(lines) + "\n"
 
     if shell in {"cmd", "cmd.exe"}:
@@ -286,6 +316,14 @@ def deactivation_script(snapshot: dict[str, str], *, shell: str) -> str:
                 lines.append(f"export {key}={_posix_quote(values[key])}")
             else:
                 lines.append(f"unset {key}")
+        lines.extend(
+            [
+                'if [ -n "${GE_ORIG_PS1+x}" ]; then',
+                '    PS1="$GE_ORIG_PS1"',
+                "    unset GE_ORIG_PS1",
+                "fi",
+            ]
+        )
         lines.append("hash -r 2>/dev/null || true")
         return "\n".join(lines) + "\n"
 
@@ -300,6 +338,14 @@ def deactivation_script(snapshot: dict[str, str], *, shell: str) -> str:
                 lines.append(f"set -gx PATH {joined}")
             else:
                 lines.append(f"set -gx {key} {_fish_quote(values[key])}")
+        lines.extend(
+            [
+                "if functions -q __ge_original_prompt",
+                "    functions -c __ge_original_prompt fish_prompt",
+                "    functions -e __ge_original_prompt",
+                "end",
+            ]
+        )
         return "\n".join(lines) + "\n"
 
     if shell in {"powershell", "pwsh"}:
@@ -309,6 +355,15 @@ def deactivation_script(snapshot: dict[str, str], *, shell: str) -> str:
                 lines.append(f"$env:{key} = {hex_quote_ps(values[key])}")
             else:
                 lines.append(f"Remove-Item Env:{key} -ErrorAction SilentlyContinue")
+        lines.extend(
+            [
+                "if ($global:__ge_original_prompt) {",
+                "    Set-Item -Path Function:\\global:prompt -Value $global:__ge_original_prompt",
+                "    Remove-Variable __ge_original_prompt -Scope Global "
+                "-ErrorAction SilentlyContinue",
+                "}",
+            ]
+        )
         return "\n".join(lines) + "\n"
 
     if shell in {"cmd", "cmd.exe"}:

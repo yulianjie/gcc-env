@@ -80,8 +80,15 @@ ge activate gcc13
 c++ --version
 c++ -std=c++20 main.cpp -o app
 
+ge status
 ge deactivate
 ```
+
+`ge activate` 默认同时开启**全局激活**：新开的、加载了 profile hook 的 shell 会
+自动激活 `gcc13`，提示符显示 `(gcc13)`。只想影响当前 shell 时使用
+`--session`。`ge deactivate` 会移除提示符并恢复环境，同时关闭全局激活；
+`ge deactivate --session` 只退出当前 shell，保留全局激活。`ge status` 可查看
+当前 shell、全局激活和默认环境状态。
 
 `ge activate` 必须修改**当前 shell**。普通可执行程序无法做到这一点，因此
 `ge shell-init --install` 会在 profile（bash/zsh/fish/PowerShell）中安装一个
@@ -139,8 +146,9 @@ ge c++ --print-command -- -std=c++20 main.cpp -o app
 | `ge remove NAME` | 删除环境（默认需要确认，脚本中加 `--yes`）。 |
 | `ge shell [NAME]` | 打开已激活工具链的干净交互 shell。 |
 | `ge run [NAME] -- CMD` | 在环境中运行一条命令。 |
-| `ge activate [NAME]` | 在当前 shell 中激活（需先执行 `ge shell-init --install`）。 |
-| `ge deactivate` | 恢复激活前的 shell 环境。 |
+| `ge activate [NAME]` | 在当前 shell 激活，并默认开启新 shell 的全局自动激活（`--session` 仅当前 shell）。 |
+| `ge deactivate` | 恢复环境并关闭全局自动激活（`--session` 保留全局激活）。 |
+| `ge status` | 显示 shell 激活、全局激活、当前默认环境和提示符状态。 |
 | `ge shell-init` | 打印/安装/卸载 shell hook（`--install`、`--uninstall`）。 |
 | `ge cc` / `ge c++` | 按运行时策略调用环境 C/C++ 编译器。 |
 | `ge doctor [NAME]` | 检查编译器、glibc 目标、libstdc++、RPATH 和 uv 工具。 |
@@ -189,6 +197,22 @@ shim 目录包含 `c`、`cc`、`gcc`、`c++`、`g++` 包装命令，它们委托
 `ge c++`，因此裸编译器名也遵循相同的运行时策略。`ge shell-init --install`
 负责让 `ge activate`/`ge deactivate` 能修改父 shell；没有安装 hook 时请使用
 `eval "$(ge activate ...)"`。
+
+注意：`cc -v`（以及 `c++ -v`）是 GCC 的详细诊断参数，会按设计打印大量配置
+信息；只查看版本请用 `cc --version`。
+
+### 全局激活与提示符
+
+`ge activate NAME` 会写入 `~/.ge/active` 并修改当前 shell。已安装的 shell
+hook 会在新 shell 中自动激活该环境，并在提示符前加 `(NAME)`。
+`ge deactivate` 同时清理当前 shell 和 `~/.ge/active`。仅当前 shell 激活：
+
+```console
+ge activate gcc13 --session
+ge deactivate --session
+```
+
+在某个 shell 中设置 `GE_NO_AUTO_ACTIVATE=1` 可跳过该 shell 的全局自动激活。
 
 ## `libstdc++.so.6` 问题
 

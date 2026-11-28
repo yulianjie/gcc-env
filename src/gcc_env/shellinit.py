@@ -15,25 +15,30 @@ END = "# <<< gcc-env shell integration <<<"
 
 _FUNCTION_BASH = """\
 # gcc-env shell integration (bash/zsh)
+GE_CLI={binary}
 ge() {{
     if [ "$#" -gt 0 ] && {{ [ "$1" = "activate" ] || [ "$1" = "deactivate" ]; }}; then
         local __ge_code
-        __ge_code="$(GE_SHELL={shell} command ge "$@")" || return $?
+        __ge_code="$(GE_SHELL={shell} command "$GE_CLI" "$@")" || return $?
         if [ -n "$__ge_code" ]; then
             eval "$__ge_code"
         fi
     else
-        command ge "$@"
+        command "$GE_CLI" "$@"
     fi
 }}
+if [ -z "${{GE_ACTIVE:-}}" ] && [ -z "${{GE_NO_AUTO_ACTIVATE:-}}" ]; then
+    ge activate --auto >/dev/null 2>&1 || true
+fi
 """
 
 _FUNCTION_FISH = """\
 # gcc-env shell integration (fish)
+set -g __GE_CLI {binary}
 function ge
     if test (count $argv) -gt 0; and contains -- $argv[1] activate deactivate
         set -lx GE_SHELL fish
-        set -l __ge_code (command ge $argv)
+        set -l __ge_code (command $__GE_CLI $argv)
         set -l __ge_status $status
         set -e GE_SHELL
         if test $__ge_status -ne 0
@@ -43,30 +48,35 @@ function ge
             printf '%s\\n' $__ge_code | source
         end
     else
-        command ge $argv
+        command $__GE_CLI $argv
     end
+end
+if not set -q GE_ACTIVE; and not set -q GE_NO_AUTO_ACTIVATE
+    ge activate --auto >/dev/null 2>&1
 end
 """
 
 _FUNCTION_POWERSHELL = """\
 # gcc-env shell integration (PowerShell)
-function global:ge {
-    $geCommand = Get-Command ge -CommandType Application -ErrorAction SilentlyContinue |
-        Select-Object -First 1
-    if (-not $geCommand) {
+$global:__GE_CLI = {binary}
+function global:ge {{
+    $geExe = $global:__GE_CLI
+    if (-not $geExe) {{
         Write-Error "ge executable not found in PATH"
         return
-    }
-    $geExe = $geCommand.Source
-    if ($args.Count -gt 0 -and ($args[0] -eq 'activate' -or $args[0] -eq 'deactivate')) {
+    }}
+    if ($args.Count -gt 0 -and ($args[0] -eq 'activate' -or $args[0] -eq 'deactivate')) {{
         $env:GE_SHELL = 'powershell'
         $code = & $geExe @args
-        if ($LASTEXITCODE -ne 0) { return }
-        if ($code) { Invoke-Expression ($code -join [Environment]::NewLine) }
-    } else {
+        if ($LASTEXITCODE -ne 0) {{ return }}
+        if ($code) {{ Invoke-Expression ($code -join [Environment]::NewLine) }}
+    }} else {{
         & $geExe @args
-    }
-}
+    }}
+}}
+if (-not $env:GE_ACTIVE -and -not $env:GE_NO_AUTO_ACTIVATE) {{
+    ge activate --auto 2>$null
+}}
 """
 
 
@@ -81,14 +91,17 @@ def normalize_shell(shell: str) -> str:
     raise UsageError(f"unsupported shell: {shell}")
 
 
-def render(shell: str) -> str:
+def render(shell: str, executable: str | None = None) -> str:
     shell = normalize_shell(shell)
+    binary = executable or find_ge_executable() or "ge"
     if shell in {"bash", "zsh"}:
-        return _FUNCTION_BASH.format(shell=shell)
+        quoted = "'" + binary.replace("'", "'\"'\"'") + "'"
+        return _FUNCTION_BASH.format(shell=shell, binary=quoted)
     if shell == "fish":
-        return _FUNCTION_FISH
+        quoted = "'" + binary.replace("\\", "\\\\").replace("'", "\\'") + "'"
+        return _FUNCTION_FISH.format(binary=quoted)
     if shell == "powershell":
-        return _FUNCTION_POWERSHELL
+        return _FUNCTION_POWERSHELL.format(binary=hex_quote_ps(binary))
     raise UsageError(
         "cmd.exe has no shell-function mechanism; use PowerShell or WSL",
         hint="Run 'ge activate --shell cmd' and use the printed set commands manually.",

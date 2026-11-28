@@ -99,8 +99,16 @@ ge activate gcc13
 c++ --version
 c++ -std=c++20 main.cpp -o app
 
+ge status
 ge deactivate
 ```
+
+`ge activate` also enables **global activation** by default: new shells that
+load the profile hook start with `gcc13` active and show `(gcc13)` in the
+prompt. Use `--session` for a venv-style, current-shell-only activation. The
+prompt prefix is removed and the previous environment restored by
+`ge deactivate`; use `deactivate --session` to keep global activation enabled.
+`ge status` shows the shell, global, and default states.
 
 `ge activate` must be able to modify the **current** shell. A normal executable
 cannot do that, so `ge shell-init --install` adds a small wrapper function to
@@ -168,8 +176,9 @@ ge c++ --print-command -- -std=c++20 main.cpp -o app
 | `ge remove NAME` | Delete an environment (asks for confirmation; `--yes` for scripts). |
 | `ge shell [NAME]` | Spawn a clean interactive shell with the toolchain activated. |
 | `ge run [NAME] -- CMD` | Run one command with `CC`, `CXX`, `PATH`, and runtime paths set. |
-| `ge activate [NAME]` | Activate in the current shell (requires `ge shell-init --install`). |
-| `ge deactivate` | Restore the shell environment from before activation. |
+| `ge activate [NAME]` | Activate in the current shell and enable global auto-activation (`--session` for this shell only). |
+| `ge deactivate` | Restore the shell and disable global auto-activation (`--session` keeps it enabled). |
+| `ge status` | Show shell activation, global activation, current default, and prompt state. |
 | `ge shell-init` | Print the shell hook; `--install`/`--uninstall` manage the profile block. |
 | `ge cc` / `ge c++` | Invoke the environment C/C++ compiler with the runtime policy applied. |
 | `ge doctor [NAME]` | Check compiler, glibc target, libstdc++, RPATH, and uv tools. |
@@ -226,6 +235,24 @@ The shim directory contains `c`, `cc`, `gcc`, `c++`, and `g++` wrappers that
 delegate to `ge cc` / `ge c++`, so the bare compiler names respect the same
 runtime policy. `ge shell-init --install` is what lets `ge activate`/`ge deactivate`
 change the parent shell; without it, use `eval "$(ge activate ...)"`.
+
+Note that `cc -v` (and `c++ -v`) is GCC's verbose diagnostic flag and prints a
+large configuration dump by design. Use `cc --version` for a one-line version.
+
+### Global activation and prompts
+
+`ge activate NAME` writes `~/.ge/active` and updates the current shell. The
+installed shell hook auto-activates that environment in new shells, and
+`(NAME)` is prepended to the prompt. `ge deactivate` clears both the current
+shell state and `~/.ge/active`. For a purely local activation:
+
+```console
+ge activate gcc13 --session
+ge deactivate --session
+```
+
+Set `GE_NO_AUTO_ACTIVATE=1` in a shell to skip global auto-activation for that
+shell.
 
 ### Why micromamba *and* uv?
 

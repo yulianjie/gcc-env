@@ -114,6 +114,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("current", help="print the current environment name")
     p.add_argument("--json", action="store_true")
 
+    p = sub.add_parser("status", help="show shell and global activation state")
+    p.add_argument("--json", action="store_true")
+
     p = sub.add_parser("remove", aliases=["rm"], help="delete an environment")
     p.add_argument("name")
     p.add_argument("--yes", "-y", action="store_true", help="do not ask for confirmation")
@@ -137,12 +140,37 @@ def build_parser() -> argparse.ArgumentParser:
         default="auto",
         help="bash, zsh, fish, powershell, cmd, or auto (default)",
     )
+    p.add_argument(
+        "--session",
+        action="store_true",
+        help="activate only this shell; do not auto-activate new shells",
+    )
+    p.add_argument(
+        "--auto",
+        action="store_true",
+        help="internal: activate the globally active environment if one is set",
+    )
+    p.add_argument(
+        "--print-code",
+        action="store_true",
+        help="print shell code even when the shell hook is not active",
+    )
 
     p = sub.add_parser("deactivate", help="restore the shell environment before activation")
     p.add_argument(
         "--shell",
         default="auto",
         help="bash, zsh, fish, powershell, cmd, or auto (default)",
+    )
+    p.add_argument(
+        "--session",
+        action="store_true",
+        help="keep the global activation enabled for new shells",
+    )
+    p.add_argument(
+        "--print-code",
+        action="store_true",
+        help="print shell code even when the shell hook is not active",
     )
 
     p = sub.add_parser(
@@ -418,30 +446,76 @@ def cmd_current(args, config: Config, manager: EnvManager) -> int:
     return 0
 
 
+def cmd_status(args, config: Config, manager: EnvManager) -> int:
+    shell_env = os.environ.get("GE_ENV") or None
+    global_env = manager.active_name()
+    try:
+        current = manager.current().name
+    except GeError:
+        current = None
+    data = {
+        "shell_environment": shell_env,
+        "global_activation": global_env,
+        "current_default": current,
+        "ge_root": str(config.root),
+    }
+    if args.json:
+        print(json.dumps(data, indent=2))
+        return 0
+    header("gcc-env status")
+    print(f"shell environment : {shell_env or 'none'}")
+    print(f"global activation : {global_env or 'disabled'}")
+    print(f"current default   : {current or 'none'}")
+    if shell_env:
+        print(f"prompt            : ({shell_env})")
+    return 0
+
+
 def cmd_remove(args, config: Config, manager: EnvManager) -> int:
     manager.remove(args.name, yes=args.yes)
     return 0
 
 
 def cmd_activate(args, config: Config, manager: EnvManager) -> int:
-    env = _resolve(manager, args.name)
-    env.ensure_shims()
     shell = args.shell
     if shell == "auto":
         shell = detect_shell()
+
+    if args.auto:
+        if os.environ.get("GE_ACTIVE"):
+            return 0
+        if args.name:
+            raise UsageError("--auto does not accept an environment name")
+        name = manager.active_name()
+        if not name:
+            return 0
+        env = manager.load(name)
+    else:
+        if not os.environ.get("GE_SHELL") and sys.stdout.isatty() and not args.print_code:
+            _print_hook_hint(shell, "activate")
+            return 1
+        env = _resolve(manager, args.name)
+
+    env.ensure_shims()
     session = ensure_session()
     save_snapshot(config, session, env.name)
+    if not args.auto and not args.session:
+        manager.set_active(env.name)
     script = activation_script(env, shell=shell, session=session)
     sys.stdout.write(script)
-    if not os.environ.get("GE_SHELL") and sys.stderr.isatty():
-        _print_hook_hint(shell, "activate")
+    if not args.auto:
+        if args.session:
+            success(f"activated {env.name} (GCC {env.gcc_version}) for this shell only")
+        else:
+            success(
+                f"activated {env.name} (GCC {env.gcc_version}); new shells will auto-activate it"
+            )
     return 0
 
 
 def _print_hook_hint(shell: str, action: str) -> None:
     hint(
-        "This shell has no gcc-env hook, so the code above was only printed "
-        f"and '{action}' did not change the shell."
+        f"This shell has no gcc-env hook, so gcc-env cannot modify it. '{action}' was not applied."
     )
     if shell in {"powershell", "pwsh"}:
         hint(
@@ -463,14 +537,23 @@ def cmd_deactivate(args, config: Config, manager: EnvManager) -> int:
     shell = args.shell
     if shell == "auto":
         shell = detect_shell()
+
+    if not os.environ.get("GE_SHELL") and sys.stdout.isatty() and not args.print_code:
+        _print_hook_hint(shell, "deactivate")
+        return 1
+
     session = current_session()
     state = pop_state(config, session)
+    if not args.session:
+        manager.clear_active()
     if state is None:
         info("no active gcc-env environment")
         return 0
     sys.stdout.write(deactivation_script(state["env"], shell=shell))
-    if not os.environ.get("GE_SHELL") and sys.stderr.isatty():
-        _print_hook_hint(shell, "deactivate")
+    if not args.session:
+        success(f"deactivated {state['environment']}; global activation disabled")
+    else:
+        success(f"deactivated {state['environment']} for this shell only")
     return 0
 
 
@@ -827,6 +910,7 @@ def main(argv: list[str] | None = None) -> int:
             "use": cmd_use,
             "switch": cmd_use,
             "current": cmd_current,
+            "status": cmd_status,
             "remove": cmd_remove,
             "rm": cmd_remove,
             "shell": cmd_shell,

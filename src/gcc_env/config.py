@@ -88,6 +88,11 @@ class Config:
         return self.root / "current"
 
     @property
+    def active_path(self) -> Path:
+        """Environment that shell profiles should auto-activate globally."""
+        return self.root / "active"
+
+    @property
     def state_dir(self) -> Path:
         return self.root / "state"
 
